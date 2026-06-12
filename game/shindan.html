@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>あなたの適職診断</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: "Hiragino Maru Gothic Pro", "Yu Gothic", sans-serif;
+  }
+  .card {
+    background: #fff;
+    width: 90%;
+    max-width: 560px;
+    border-radius: 20px;
+    padding: 36px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+    text-align: center;
+  }
+  h1 { margin: 0 0 8px; color: #4a3f8f; font-size: 26px; }
+  .subtitle { color: #888; font-size: 14px; margin-bottom: 24px; }
+  .progress-bar {
+    height: 10px;
+    background: #eee;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+  .question-num { color: #764ba2; font-weight: bold; font-size: 14px; }
+  .question-text {
+    font-size: 20px;
+    font-weight: bold;
+    color: #333;
+    margin: 12px 0 24px;
+    min-height: 56px;
+  }
+  .option {
+    display: block;
+    width: 100%;
+    margin: 10px 0;
+    padding: 14px 18px;
+    font-size: 16px;
+    font-family: inherit;
+    text-align: left;
+    background: #f5f3ff;
+    border: 2px solid #ddd6ff;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .option:hover {
+    background: #e8e2ff;
+    border-color: #764ba2;
+    transform: translateX(4px);
+  }
+  .btn {
+    margin-top: 20px;
+    padding: 14px 40px;
+    font-size: 18px;
+    font-family: inherit;
+    font-weight: bold;
+    color: #fff;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .btn:hover { transform: scale(1.05); }
+  .result-emoji { font-size: 64px; margin: 10px 0; }
+  .result-title { font-size: 26px; color: #4a3f8f; font-weight: bold; margin: 10px 0; }
+  .result-desc { font-size: 15px; color: #555; line-height: 1.8; text-align: left; margin: 16px 0; }
+  .chart { text-align: left; margin: 20px 0; }
+  .chart-row { display: flex; align-items: center; margin: 8px 0; font-size: 13px; }
+  .chart-label { width: 90px; color: #555; }
+  .chart-bar-bg { flex: 1; height: 14px; background: #eee; border-radius: 7px; overflow: hidden; }
+  .chart-bar { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 7px; transition: width 0.8s ease; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <!-- Start screen -->
+  <div id="start-screen">
+    <h1>🔮 あなたの適職診断</h1>
+    <p class="subtitle">10の質問に答えて、あなたにぴったりの仕事を見つけよう!</p>
+    <div style="font-size:60px; margin:20px 0;">💼✨</div>
+    <button class="btn" onclick="startQuiz()">診断スタート</button>
+  </div>
+
+  <!-- Quiz screen -->
+  <div id="quiz-screen" class="hidden">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="question-num" id="qnum"></div>
+    <div class="question-text" id="qtext"></div>
+    <div id="options"></div>
+  </div>
+
+  <!-- Result screen -->
+  <div id="result-screen" class="hidden">
+    <h1>診断結果</h1>
+    <div class="result-emoji" id="result-emoji"></div>
+    <div class="result-title" id="result-title"></div>
+    <div class="result-desc" id="result-desc"></div>
+    <div class="chart" id="chart"></div>
+    <button class="btn" onclick="restart()">もう一度診断する</button>
+  </div>
+</div>
+
+<script>
+// 5 personality axes: creative(創造), logical(論理), social(対人), leader(統率), steady(堅実)
+const questions = [
+  {
+    text: '休日の過ごし方で一番好きなのは?',
+    options: [
+      { label: '絵を描いたり音楽を作ったりする', scores: { creative: 2 } },
+      { label: 'パズルや読書でじっくり頭を使う', scores: { logical: 2 } },
+      { label: '友達と集まってワイワイ過ごす', scores: { social: 2 } },
+      { label: '計画を立てて部屋の整理や家計の見直し', scores: { steady: 2 } }
+    ]
+  },
+  {
+    text: 'グループ作業でのあなたの役割は?',
+    options: [
+      { label: 'みんなを引っ張るリーダー役', scores: { leader: 2 } },
+      { label: 'アイデアをどんどん出す発案役', scores: { creative: 2 } },
+      { label: 'メンバーの間を取り持つ調整役', scores: { social: 2 } },
+      { label: '細かい作業を確実にこなす実務役', scores: { steady: 2 } }
+    ]
+  },
+  {
+    text: '問題が起きたとき、まずどうする?',
+    options: [
+      { label: '原因をデータや事実から分析する', scores: { logical: 2 } },
+      { label: '今までにない解決法を考えてみる', scores: { creative: 2 } },
+      { label: 'みんなの意見を聞いてまとめる', scores: { social: 1, leader: 1 } },
+      { label: 'マニュアルや過去の事例を確認する', scores: { steady: 2 } }
+    ]
+  },
+  {
+    text: '褒められて一番うれしい言葉は?',
+    options: [
+      { label: '「センスがいいね!」', scores: { creative: 2 } },
+      { label: '「頭がいいね!」', scores: { logical: 2 } },
+      { label: '「一緒にいると楽しい!」', scores: { social: 2 } },
+      { label: '「頼りになるね!」', scores: { leader: 2 } }
+    ]
+  },
+  {
+    text: '理想の働き方は?',
+    options: [
+      { label: '自由な発想を活かせる職場', scores: { creative: 2 } },
+      { label: '専門性を深められる職場', scores: { logical: 2 } },
+      { label: '人と関わりが多い職場', scores: { social: 2 } },
+      { label: '安定していて長く働ける職場', scores: { steady: 2 } }
+    ]
+  },
+  {
+    text: '初対面の人と話すのは?',
+    options: [
+      { label: '得意!すぐ仲良くなれる', scores: { social: 2 } },
+      { label: '自分から話題を提供してリードする', scores: { leader: 2 } },
+      { label: '少し苦手。聞き役にまわることが多い', scores: { steady: 1, logical: 1 } },
+      { label: '相手によるけど、面白い人なら大歓迎', scores: { creative: 1, social: 1 } }
+    ]
+  },
+  {
+    text: '新しいことを学ぶとき、どのスタイルが好き?',
+    options: [
+      { label: 'まず理論や仕組みを理解する', scores: { logical: 2 } },
+      { label: 'とにかく手を動かして試す', scores: { creative: 2 } },
+      { label: '人に教えてもらいながら学ぶ', scores: { social: 2 } },
+      { label: '教科書どおりに順番に進める', scores: { steady: 2 } }
+    ]
+  },
+  {
+    text: '大きな決断をするときは?',
+    options: [
+      { label: '直感を信じる', scores: { creative: 2 } },
+      { label: 'メリット・デメリットを書き出して比較', scores: { logical: 2 } },
+      { label: '信頼できる人に相談する', scores: { social: 2 } },
+      { label: '自分で決めて責任を持つ', scores: { leader: 2 } }
+    ]
+  },
+  {
+    text: '10年後、どうなっていたい?',
+    options: [
+      { label: '自分の作品や成果物が世に出ている', scores: { creative: 2 } },
+      { label: 'その道の専門家として認められている', scores: { logical: 2 } },
+      { label: 'チームや会社を率いる立場になっている', scores: { leader: 2 } },
+      { label: '安定した生活で穏やかに暮らしている', scores: { steady: 2 } }
+    ]
+  },
+  {
+    text: 'ストレスを感じるのはどんなとき?',
+    options: [
+      { label: 'ルールに縛られて自由がないとき', scores: { creative: 2 } },
+      { label: '非効率なやり方を強制されるとき', scores: { logical: 2 } },
+      { label: 'ひとりぼっちで作業が続くとき', scores: { social: 2 } },
+      { label: '予定が急に変わって振り回されるとき', scores: { steady: 2 } }
+    ]
+  }
+];
+
+const results = {
+  creative: {
+    emoji: '🎨',
+    title: 'クリエイター系',
+    jobs: 'デザイナー / イラストレーター / 映像クリエイター / 商品企画',
+    desc: 'あなたは自由な発想と豊かな感性の持ち主。型にはまらないアイデアで人を驚かせる力があります。決まりきった作業よりも、ゼロから何かを生み出す仕事で輝けるタイプです。'
+  },
+  logical: {
+    emoji: '🔬',
+    title: 'スペシャリスト系',
+    jobs: 'エンジニア / 研究者 / データアナリスト / 会計士',
+    desc: 'あなたは物事を論理的に考え、深く掘り下げる力に優れています。複雑な問題をコツコツ解き明かすことに喜びを感じるタイプ。専門性を磨いて第一人者を目指せる人です。'
+  },
+  social: {
+    emoji: '🤝',
+    title: 'コミュニケーター系',
+    jobs: '営業 / 教師 / カウンセラー / 接客・サービス業',
+    desc: 'あなたは人の気持ちを汲み取り、誰とでも信頼関係を築ける天性のコミュニケーター。人と関わり、誰かの役に立つことが何よりのエネルギー源になるタイプです。'
+  },
+  leader: {
+    emoji: '👑',
+    title: 'リーダー系',
+    jobs: '経営者 / プロジェクトマネージャー / プロデューサー / 起業家',
+    desc: 'あなたは決断力と責任感を兼ね備えた生まれながらのリーダー。目標に向かってチームを引っ張り、大きなことを成し遂げる器の持ち主です。'
+  },
+  steady: {
+    emoji: '🏛️',
+    title: 'サポーター系',
+    jobs: '公務員 / 事務 / 経理 / 品質管理 / 医療事務',
+    desc: 'あなたは正確さと誠実さで信頼を集める縁の下の力持ち。計画的に物事を進め、ミスなく確実に仕事をこなす力は、どんな組織でも欠かせない財産です。'
+  }
+};
+
+const axisNames = {
+  creative: '創造性',
+  logical: '論理性',
+  social: '対人力',
+  leader: '統率力',
+  steady: '堅実さ'
+};
+
+let current = 0;
+let scores = {};
+
+function startQuiz() {
+  current = 0;
+  scores = { creative: 0, logical: 0, social: 0, leader: 0, steady: 0 };
+  show('quiz-screen');
+  renderQuestion();
+}
+
+function show(id) {
+  ['start-screen', 'quiz-screen', 'result-screen'].forEach(s => {
+    document.getElementById(s).classList.toggle('hidden', s !== id);
+  });
+}
+
+function renderQuestion() {
+  const q = questions[current];
+  document.getElementById('progress').style.width = (current / questions.length * 100) + '%';
+  document.getElementById('qnum').textContent = `Q${current + 1} / ${questions.length}`;
+  document.getElementById('qtext').textContent = q.text;
+  const optDiv = document.getElementById('options');
+  optDiv.innerHTML = '';
+  // Shuffle option display order so answers aren't predictable by position
+  const shuffled = q.options.map((o, i) => ({ o, i })).sort(() => Math.random() - 0.5);
+  shuffled.forEach(({ o }) => {
+    const btn = document.createElement('button');
+    btn.className = 'option';
+    btn.textContent = o.label;
+    btn.onclick = () => answer(o.scores);
+    optDiv.appendChild(btn);
+  });
+}
+
+function answer(answerScores) {
+  for (const [k, v] of Object.entries(answerScores)) {
+    scores[k] += v;
+  }
+  current++;
+  if (current < questions.length) {
+    renderQuestion();
+  } else {
+    showResult();
+  }
+}
+
+function showResult() {
+  show('result-screen');
+  const topKey = Object.keys(scores).reduce((a, b) => scores[a] >= scores[b] ? a : b);
+  const r = results[topKey];
+  document.getElementById('result-emoji').textContent = r.emoji;
+  document.getElementById('result-title').textContent = `あなたは「${r.title}」!`;
+  document.getElementById('result-desc').innerHTML =
+    `<strong>おすすめの職業:</strong> ${r.jobs}<br><br>${r.desc}`;
+
+  const maxScore = Math.max(...Object.values(scores), 1);
+  const chart = document.getElementById('chart');
+  chart.innerHTML = '<strong style="font-size:14px;">📊 あなたの性格バランス</strong>';
+  for (const [key, val] of Object.entries(scores)) {
+    const row = document.createElement('div');
+    row.className = 'chart-row';
+    row.innerHTML = `
+      <div class="chart-label">${axisNames[key]}</div>
+      <div class="chart-bar-bg"><div class="chart-bar" style="width:0%"></div></div>`;
+    chart.appendChild(row);
+    requestAnimationFrame(() => {
+      row.querySelector('.chart-bar').style.width = (val / maxScore * 100) + '%';
+    });
+  }
+}
+
+function restart() {
+  show('start-screen');
+}
+</script>
+</body>
+</html>
