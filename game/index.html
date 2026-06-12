@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ちいさな島の暮らし</title>
+<style>
+  body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #2b2b2b;
+    font-family: "Hiragino Maru Gothic Pro", "Yu Gothic", sans-serif;
+    color: #333;
+  }
+  h1 { color: #fff; margin: 10px 0; }
+  #game {
+    background: #8fd17a;
+    border: 6px solid #6b4b2b;
+    border-radius: 12px;
+  }
+  #ui {
+    width: 640px;
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    color: #fff;
+    font-size: 14px;
+  }
+  #dialog {
+    width: 600px;
+    min-height: 50px;
+    background: #fff8e8;
+    border: 4px solid #d2a679;
+    border-radius: 10px;
+    margin-top: 10px;
+    padding: 10px 15px;
+    font-size: 16px;
+    box-sizing: border-box;
+  }
+  #help {
+    color: #ddd;
+    font-size: 13px;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+<h1>🌳 ちいさな島の暮らし 🌳</h1>
+<canvas id="game" width="640" height="480"></canvas>
+<div id="ui">
+  <div id="inventory">持ち物: <span id="inv"></span></div>
+  <div id="bells">ベル: <span id="bells-amt">0</span> 💰</div>
+</div>
+<div id="dialog">矢印キーで移動、住民やオブジェクトの近くでスペースキーを押して話そう/集めよう。</div>
+<div id="help">操作: ↑↓←→ 移動 / Space 話しかける・拾う</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const TILE = 32;
+const COLS = canvas.width / TILE;
+const ROWS = canvas.height / TILE;
+
+// --- World data ---
+// 0: grass, 1: water, 2: path, 3: flower, 4: tree(impassable)
+const map = [];
+for (let r = 0; r < ROWS; r++) {
+  const row = [];
+  for (let c = 0; c < COLS; c++) {
+    let tile = 0;
+    if (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1) tile = 1; // water border
+    row.push(tile);
+  }
+  map.push(row);
+}
+// Paths
+for (let c = 2; c < COLS - 2; c++) { map[7][c] = 2; }
+for (let r = 2; r < ROWS - 2; r++) { map[r][9] = 2; }
+// Trees
+const trees = [[2,2],[3,12],[10,3],[12,15],[5,17],[14,6],[2,17]];
+trees.forEach(([r,c]) => map[r][c] = 4);
+// Flowers
+const flowers = [[4,4],[4,5],[9,12],[9,13],[12,11]];
+flowers.forEach(([r,c]) => map[r][c] = 3);
+
+const tileColors = {
+  0: '#8fd17a',
+  1: '#5fb3e0',
+  2: '#e0c79a',
+  3: '#8fd17a',
+  4: '#8fd17a'
+};
+
+// --- Items to collect ---
+let fruits = [
+  { x: 4, y: 4, type: '🍎', name: 'りんご', collected: false },
+  { x: 13, y: 5, type: '🍑', name: 'もも', collected: false },
+  { x: 6, y: 11, type: '🍐', name: 'なし', collected: false },
+  { x: 16, y: 9, type: '🍊', name: 'みかん', collected: false }
+];
+
+// --- Villagers ---
+const villagers = [
+  {
+    x: 5, y: 4, emoji: '🐶', name: 'ポチ',
+    lines: [
+      'やっほー!今日もいい天気だね!',
+      'この島、最高に居心地がいいんだ。',
+      '果物を集めるの手伝ってよ!'
+    ]
+  },
+  {
+    x: 14, y: 10, emoji: '🐱', name: 'ミケ',
+    lines: [
+      'にゃーん、お魚釣りたいなぁ。',
+      'のんびり暮らすのが一番だよね。',
+      'たまに貝殻も見つかるんだよ。'
+    ]
+  },
+  {
+    x: 10, y: 4, emoji: '🐻', name: 'クマ',
+    lines: [
+      'ベルを集めて家を改装したいんだ。',
+      'いっしょに探検しない?',
+      'たまに掘ると何か出てくるかも...'
+    ]
+  }
+];
+
+// --- Buried bells (random dig spots) ---
+const digSpots = [
+  { x: 8, y: 8, found: false, amount: 100 },
+  { x: 15, y: 4, found: false, amount: 200 },
+  { x: 3, y: 13, found: false, amount: 150 }
+];
+
+// --- Player ---
+const player = {
+  x: 9, y: 7, // tile position
+  emoji: '🧑',
+  facing: 'down'
+};
+
+let inventory = {};
+let bells = 0;
+let villagerLineIndex = {};
+
+function updateUI() {
+  const invDiv = document.getElementById('inv');
+  const items = Object.entries(inventory).map(([k,v]) => `${k}x${v}`).join(' ');
+  invDiv.textContent = items || 'なし';
+  document.getElementById('bells-amt').textContent = bells;
+}
+
+function setDialog(text) {
+  document.getElementById('dialog').textContent = text;
+}
+
+function isWalkable(x, y) {
+  if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
+  const tile = map[y][x];
+  return tile !== 1 && tile !== 4;
+}
+
+function tryMove(dx, dy, facing) {
+  player.facing = facing;
+  const nx = player.x + dx;
+  const ny = player.y + dy;
+  if (isWalkable(nx, ny)) {
+    player.x = nx;
+    player.y = ny;
+  }
+}
+
+function facingOffset() {
+  switch (player.facing) {
+    case 'up': return [0, -1];
+    case 'down': return [0, 1];
+    case 'left': return [-1, 0];
+    case 'right': return [1, 0];
+  }
+  return [0, 0];
+}
+
+function interact() {
+  const [fx, fy] = facingOffset();
+  const tx = player.x + fx;
+  const ty = player.y + fy;
+
+  // Check villagers (adjacent)
+  for (const v of villagers) {
+    if (v.x === tx && v.y === ty) {
+      const idx = villagerLineIndex[v.name] || 0;
+      setDialog(`${v.emoji} ${v.name}: ${v.lines[idx % v.lines.length]}`);
+      villagerLineIndex[v.name] = idx + 1;
+      return;
+    }
+  }
+
+  // Check fruit at player's tile or facing tile
+  for (const f of fruits) {
+    if (!f.collected && ((f.x === player.x && f.y === player.y) || (f.x === tx && f.y === ty))) {
+      f.collected = true;
+      inventory[f.name] = (inventory[f.name] || 0) + 1;
+      setDialog(`${f.type} ${f.name} を手に入れた!`);
+      updateUI();
+      return;
+    }
+  }
+
+  // Check dig spots
+  for (const d of digSpots) {
+    if (!d.found && ((d.x === player.x && d.y === player.y) || (d.x === tx && d.y === ty))) {
+      d.found = true;
+      bells += d.amount;
+      setDialog(`✨ 地面から ${d.amount} ベルを見つけた!`);
+      updateUI();
+      return;
+    }
+  }
+
+  setDialog('ここには何もないみたい。');
+}
+
+// --- Input ---
+window.addEventListener('keydown', (e) => {
+  switch (e.key) {
+    case 'ArrowUp': tryMove(0, -1, 'up'); e.preventDefault(); break;
+    case 'ArrowDown': tryMove(0, 1, 'down'); e.preventDefault(); break;
+    case 'ArrowLeft': tryMove(-1, 0, 'left'); e.preventDefault(); break;
+    case 'ArrowRight': tryMove(1, 0, 'right'); e.preventDefault(); break;
+    case ' ': interact(); e.preventDefault(); break;
+  }
+});
+
+// --- Rendering ---
+function draw() {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      ctx.fillStyle = tileColors[map[r][c]];
+      ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
+      if (map[r][c] === 1) {
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.fillRect(c * TILE, r * TILE + TILE/2 - 2, TILE, 4);
+      }
+    }
+  }
+
+  // Trees
+  ctx.font = `${TILE}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  trees.forEach(([r,c]) => {
+    ctx.fillText('🌳', c * TILE + TILE/2, r * TILE + TILE/2);
+  });
+
+  // Flowers (only if not collected as fruit spot... flowers are decorative)
+  flowers.forEach(([r,c]) => {
+    ctx.font = `${TILE*0.7}px serif`;
+    ctx.fillText('🌼', c * TILE + TILE/2, r * TILE + TILE/2);
+  });
+
+  // Dig spots (show subtle marker if not found)
+  digSpots.forEach(d => {
+    if (!d.found) {
+      ctx.font = `${TILE*0.6}px serif`;
+      ctx.fillText('〜', d.x * TILE + TILE/2, d.y * TILE + TILE/2 + 8);
+    }
+  });
+
+  // Fruits
+  fruits.forEach(f => {
+    if (!f.collected) {
+      ctx.font = `${TILE*0.8}px serif`;
+      ctx.fillText(f.type, f.x * TILE + TILE/2, f.y * TILE + TILE/2);
+    }
+  });
+
+  // Villagers
+  ctx.font = `${TILE*0.9}px serif`;
+  villagers.forEach(v => {
+    ctx.fillText(v.emoji, v.x * TILE + TILE/2, v.y * TILE + TILE/2);
+  });
+
+  // Player
+  ctx.font = `${TILE*0.9}px serif`;
+  ctx.fillText(player.emoji, player.x * TILE + TILE/2, player.y * TILE + TILE/2);
+
+  requestAnimationFrame(draw);
+}
+
+updateUI();
+draw();
+</script>
+</body>
+</html>
