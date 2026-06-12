@@ -66,6 +66,31 @@
     border-color: #764ba2;
     transform: translateX(4px);
   }
+  .option.selected {
+    background: #764ba2;
+    border-color: #764ba2;
+    color: #fff;
+    font-weight: bold;
+  }
+  .nav-btns {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 20px;
+  }
+  .nav-btn {
+    padding: 12px 28px;
+    font-size: 16px;
+    font-family: inherit;
+    font-weight: bold;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .nav-btn:hover:not(:disabled) { transform: scale(1.05); }
+  .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .nav-back { background: #eee; color: #555; }
+  .nav-next { background: linear-gradient(90deg, #667eea, #764ba2); color: #fff; }
   .btn {
     margin-top: 20px;
     padding: 14px 40px;
@@ -107,6 +132,10 @@
     <div class="question-num" id="qnum"></div>
     <div class="question-text" id="qtext"></div>
     <div id="options"></div>
+    <div class="nav-btns">
+      <button class="nav-btn nav-back" id="btn-back" onclick="goBack()">← 戻る</button>
+      <button class="nav-btn nav-next" id="btn-next" onclick="goNext()">次へ →</button>
+    </div>
   </div>
 
   <!-- Result screen -->
@@ -257,11 +286,15 @@ const axisNames = {
 };
 
 let current = 0;
-let scores = {};
+let answers = [];       // selected option index per question
+let shuffledOrders = []; // fixed display order per question
 
 function startQuiz() {
   current = 0;
-  scores = { creative: 0, logical: 0, social: 0, leader: 0, steady: 0 };
+  answers = new Array(questions.length).fill(null);
+  shuffledOrders = questions.map(q =>
+    q.options.map((_, i) => i).sort(() => Math.random() - 0.5)
+  );
   show('quiz-screen');
   renderQuestion();
 }
@@ -279,23 +312,40 @@ function renderQuestion() {
   document.getElementById('qtext').textContent = q.text;
   const optDiv = document.getElementById('options');
   optDiv.innerHTML = '';
-  // Shuffle option display order so answers aren't predictable by position
-  const shuffled = q.options.map((o, i) => ({ o, i })).sort(() => Math.random() - 0.5);
-  shuffled.forEach(({ o }) => {
+  shuffledOrders[current].forEach(origIdx => {
+    const o = q.options[origIdx];
     const btn = document.createElement('button');
-    btn.className = 'option';
+    btn.className = 'option' + (answers[current] === origIdx ? ' selected' : '');
     btn.textContent = o.label;
-    btn.onclick = () => answer(o.scores);
+    btn.onclick = () => selectOption(origIdx);
     optDiv.appendChild(btn);
   });
+  document.getElementById('btn-back').disabled = current === 0;
+  updateNextButton();
 }
 
-function answer(answerScores) {
-  for (const [k, v] of Object.entries(answerScores)) {
-    scores[k] += v;
+function selectOption(origIdx) {
+  answers[current] = origIdx;
+  renderQuestion();
+}
+
+function updateNextButton() {
+  const nextBtn = document.getElementById('btn-next');
+  nextBtn.disabled = answers[current] === null;
+  nextBtn.textContent = current === questions.length - 1 ? '結果を見る ✨' : '次へ →';
+}
+
+function goBack() {
+  if (current > 0) {
+    current--;
+    renderQuestion();
   }
-  current++;
-  if (current < questions.length) {
+}
+
+function goNext() {
+  if (answers[current] === null) return;
+  if (current < questions.length - 1) {
+    current++;
     renderQuestion();
   } else {
     showResult();
@@ -304,6 +354,11 @@ function answer(answerScores) {
 
 function showResult() {
   show('result-screen');
+  const scores = { creative: 0, logical: 0, social: 0, leader: 0, steady: 0 };
+  answers.forEach((optIdx, qIdx) => {
+    const optScores = questions[qIdx].options[optIdx].scores;
+    for (const [k, v] of Object.entries(optScores)) scores[k] += v;
+  });
   const topKey = Object.keys(scores).reduce((a, b) => scores[a] >= scores[b] ? a : b);
   const r = results[topKey];
   document.getElementById('result-emoji').textContent = r.emoji;
