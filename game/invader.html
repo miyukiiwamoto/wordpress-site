@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>スペースインベーダー</title>
+<style>
+  body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #0b0b1e;
+    font-family: "Hiragino Maru Gothic Pro", "Yu Gothic", sans-serif;
+    color: #fff;
+  }
+  h1 { margin: 14px 0; letter-spacing: 2px; }
+  #game {
+    background: #000;
+    border: 4px solid #4a4a8a;
+    border-radius: 8px;
+  }
+  #ui {
+    width: 640px;
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 16px;
+  }
+  #help { color: #999; font-size: 13px; margin-top: 6px; }
+  #overlay {
+    position: absolute;
+    color: #fff;
+    text-align: center;
+    font-size: 28px;
+    text-shadow: 0 0 10px #0ff;
+    pointer-events: none;
+  }
+  .container { position: relative; }
+</style>
+</head>
+<body>
+<h1>👾 スペースインベーダー 👾</h1>
+<div class="container">
+  <canvas id="game" width="640" height="480"></canvas>
+  <div id="overlay"></div>
+</div>
+<div id="ui">
+  <div>得点: <span id="score">0</span></div>
+  <div>ライフ: <span id="lives">3</span></div>
+  <div>ステージ: <span id="stage">1</span></div>
+</div>
+<div id="help">操作: ←→ 移動 / Space 弾発射 / Pでポーズ / 全滅でステージクリア</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const overlay = document.getElementById('overlay');
+
+// --- Player ---
+const player = {
+  w: 40, h: 16,
+  x: W/2 - 20, y: H - 30,
+  speed: 5,
+  cooldown: 0
+};
+
+// --- Bullets ---
+let playerBullets = [];
+let enemyBullets = [];
+
+// --- Enemies ---
+let enemies = [];
+const ENEMY_ROWS = 4;
+const ENEMY_COLS = 8;
+const ENEMY_W = 32, ENEMY_H = 24;
+const ENEMY_GAP_X = 16, ENEMY_GAP_Y = 16;
+let enemyDir = 1;
+let enemyMoveTimer = 0;
+let enemyMoveInterval = 40; // frames between steps
+let enemyShootTimer = 0;
+
+let score = 0;
+let lives = 3;
+let stage = 1;
+let gameOver = false;
+let paused = false;
+let stageClearTimer = 0;
+
+function spawnEnemies() {
+  enemies = [];
+  const totalW = ENEMY_COLS * (ENEMY_W + ENEMY_GAP_X) - ENEMY_GAP_X;
+  const startX = (W - totalW) / 2;
+  for (let r = 0; r < ENEMY_ROWS; r++) {
+    for (let c = 0; c < ENEMY_COLS; c++) {
+      enemies.push({
+        x: startX + c * (ENEMY_W + ENEMY_GAP_X),
+        y: 40 + r * (ENEMY_H + ENEMY_GAP_Y),
+        w: ENEMY_W, h: ENEMY_H,
+        alive: true,
+        type: r === 0 ? 'top' : (r < 3 ? 'mid' : 'bottom')
+      });
+    }
+  }
+  enemyMoveInterval = Math.max(10, 40 - (stage - 1) * 4);
+}
+
+const enemyColors = { top: '#ff5566', mid: '#ffcc55', bottom: '#55ddff' };
+
+function resetGame() {
+  score = 0;
+  lives = 3;
+  stage = 1;
+  gameOver = false;
+  player.x = W/2 - 20;
+  playerBullets = [];
+  enemyBullets = [];
+  enemyDir = 1;
+  spawnEnemies();
+  updateUI();
+}
+
+function updateUI() {
+  document.getElementById('score').textContent = score;
+  document.getElementById('lives').textContent = lives;
+  document.getElementById('stage').textContent = stage;
+}
+
+// --- Input ---
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  keys[e.key] = true;
+  if (e.key === ' ') e.preventDefault();
+  if (e.key === 'p' || e.key === 'P') paused = !paused;
+  if (gameOver && e.key === 'Enter') {
+    resetGame();
+  }
+});
+window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+function rectsCollide(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function update() {
+  if (gameOver || paused) return;
+
+  // Stage clear pause
+  if (stageClearTimer > 0) {
+    stageClearTimer--;
+    if (stageClearTimer === 0) {
+      stage++;
+      spawnEnemies();
+      enemyBullets = [];
+      playerBullets = [];
+      updateUI();
+      overlay.textContent = '';
+    }
+    return;
+  }
+
+  // Player movement
+  if (keys['ArrowLeft']) player.x -= player.speed;
+  if (keys['ArrowRight']) player.x += player.speed;
+  player.x = Math.max(0, Math.min(W - player.w, player.x));
+
+  // Player shoot
+  if (player.cooldown > 0) player.cooldown--;
+  if (keys[' '] && player.cooldown === 0) {
+    playerBullets.push({ x: player.x + player.w/2 - 2, y: player.y, w: 4, h: 10 });
+    player.cooldown = 15;
+  }
+
+  // Update bullets
+  playerBullets.forEach(b => b.y -= 8);
+  playerBullets = playerBullets.filter(b => b.y + b.h > 0);
+
+  enemyBullets.forEach(b => b.y += 5);
+  enemyBullets = enemyBullets.filter(b => b.y < H);
+
+  // Move enemies
+  enemyMoveTimer++;
+  if (enemyMoveTimer >= enemyMoveInterval) {
+    enemyMoveTimer = 0;
+    let hitEdge = false;
+    enemies.forEach(en => {
+      if (!en.alive) return;
+      const nx = en.x + enemyDir * 16;
+      if (nx < 0 || nx + en.w > W) hitEdge = true;
+    });
+    if (hitEdge) {
+      enemyDir *= -1;
+      enemies.forEach(en => { if (en.alive) en.y += 16; });
+    } else {
+      enemies.forEach(en => { if (en.alive) en.x += enemyDir * 16; });
+    }
+  }
+
+  // Enemy shooting
+  enemyShootTimer++;
+  const shootRate = Math.max(15, 40 - stage * 3);
+  if (enemyShootTimer >= shootRate) {
+    enemyShootTimer = 0;
+    const alive = enemies.filter(e => e.alive);
+    if (alive.length > 0) {
+      const shooter = alive[Math.floor(Math.random() * alive.length)];
+      enemyBullets.push({ x: shooter.x + shooter.w/2 - 2, y: shooter.y + shooter.h, w: 4, h: 10 });
+    }
+  }
+
+  // Collisions: player bullets vs enemies
+  playerBullets.forEach(b => {
+    enemies.forEach(en => {
+      if (en.alive && rectsCollide(b, en)) {
+        en.alive = false;
+        b.y = -100; // mark for removal
+        score += en.type === 'top' ? 30 : (en.type === 'mid' ? 20 : 10);
+      }
+    });
+  });
+  playerBullets = playerBullets.filter(b => b.y > -50);
+
+  // Collisions: enemy bullets vs player
+  const playerBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+  enemyBullets.forEach(b => {
+    if (rectsCollide(b, playerBox)) {
+      b.y = H + 100;
+      loseLife();
+    }
+  });
+  enemyBullets = enemyBullets.filter(b => b.y < H + 50);
+
+  // Check enemies reaching player row
+  enemies.forEach(en => {
+    if (en.alive && en.y + en.h >= player.y) {
+      loseLife();
+      en.alive = false;
+    }
+  });
+
+  // Check stage clear
+  if (enemies.every(e => !e.alive) && stageClearTimer === 0) {
+    stageClearTimer = 90;
+    overlay.textContent = `ステージ ${stage} クリア!`;
+  }
+
+  updateUI();
+}
+
+function loseLife() {
+  lives--;
+  updateUI();
+  if (lives <= 0) {
+    gameOver = true;
+    overlay.textContent = `ゲームオーバー  得点: ${score}\nEnterキーでリスタート`;
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars background
+  ctx.fillStyle = '#444';
+  for (let i = 0; i < 40; i++) {
+    const sx = (i * 53) % W;
+    const sy = (i * 97) % H;
+    ctx.fillRect(sx, sy, 2, 2);
+  }
+
+  // Player
+  ctx.fillStyle = '#55ff88';
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+  ctx.fillRect(player.x + player.w/2 - 4, player.y - 8, 8, 8);
+
+  // Player bullets
+  ctx.fillStyle = '#fff';
+  playerBullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+
+  // Enemy bullets
+  ctx.fillStyle = '#ff4444';
+  enemyBullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+
+  // Enemies
+  enemies.forEach(en => {
+    if (!en.alive) return;
+    ctx.fillStyle = enemyColors[en.type];
+    ctx.fillRect(en.x, en.y, en.w, en.h);
+    // simple "eyes"
+    ctx.fillStyle = '#000';
+    ctx.fillRect(en.x + 6, en.y + 8, 5, 5);
+    ctx.fillRect(en.x + en.w - 11, en.y + 8, 5, 5);
+  });
+
+  if (paused && !gameOver) {
+    overlay.textContent = 'ポーズ中 (Pキーで再開)';
+  } else if (!gameOver && stageClearTimer === 0) {
+    overlay.textContent = '';
+  }
+
+  // position overlay
+  overlay.style.left = '0px';
+  overlay.style.top = (H/2 - 20) + 'px';
+  overlay.style.width = W + 'px';
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+resetGame();
+loop();
+</script>
+</body>
+</html>
